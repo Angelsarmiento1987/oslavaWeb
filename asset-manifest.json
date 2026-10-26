@@ -1,13 +1,13 @@
 {
   "files": {
-    "main.css": "/oslava-web/static/css/main.02f8b6fa.css",
-    "main.js": "/oslava-web/static/js/main.0401a017.js",
-    "index.html": "/oslava-web/index.html",
-    "main.02f8b6fa.css.map": "/oslava-web/static/css/main.02f8b6fa.css.map",
-    "main.0401a017.js.map": "/oslava-web/static/js/main.0401a017.js.map"
+    "main.css": "/oslavaWeb/static/css/main.02f8b6fa.css",
+    "main.js": "/oslavaWeb/static/js/main.1bfd839d.js",
+    "index.html": "/oslavaWeb/index.html",
+    "main.02f8b6fa.css.map": "/oslavaWeb/static/css/main.02f8b6fa.css.map",
+    "main.1bfd839d.js.map": "/oslavaWeb/static/js/main.1bfd839d.js.map"
   },
   "entrypoints": [
     "static/css/main.02f8b6fa.css",
-    "static/js/main.0401a017.js"
+    "static/js/main.1bfd839d.js"
   ]
 }

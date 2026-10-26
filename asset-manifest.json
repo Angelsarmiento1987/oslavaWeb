@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/oslava-web/static/css/main.02f8b6fa.css",
+    "main.js": "/oslava-web/static/js/main.0401a017.js",
+    "index.html": "/oslava-web/index.html",
+    "main.02f8b6fa.css.map": "/oslava-web/static/css/main.02f8b6fa.css.map",
+    "main.0401a017.js.map": "/oslava-web/static/js/main.0401a017.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.02f8b6fa.css",
+    "static/js/main.0401a017.js"
+  ]
+}

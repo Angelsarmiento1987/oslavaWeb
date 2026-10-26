@@ -1,0 +1,156 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function admin() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'admin';
+    }
+    function tablero() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'tablero';
+    }
+    function authorized() {
+      return admin() || (signedIn() && request.auth.token.email is string &&
+        exists(/databases/$(database)/documents/mails_autorizados/$(request.auth.token.email.lower())) &&
+        get(/databases/$(database)/documents/mails_autorizados/$(request.auth.token.email.lower())).data.activo == true);
+    }
+    match /mails_autorizados/{email} {
+      allow get: if admin() || (signedIn() && request.auth.token.email is string && request.auth.token.email.lower() == email);
+      allow list: if admin();
+      allow create, update: if admin() && request.resource.data.keys().hasOnly(['email', 'activo']) &&
+        request.resource.data.email == email && request.resource.data.activo is bool;
+      allow delete: if admin();
+    }
+    match /usuarios/{uid} {
+      // WEB: leer exclusivamente el perfil propio antes de verificar la autorización.
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow read: if authorized() || (tablero() && uid == request.auth.uid);
+      allow create: if authorized() && request.auth.uid == uid &&
+        request.resource.data.keys().hasOnly(['email','apodo','rol']) &&
+        request.resource.data.keys().hasAll(['email','apodo','rol']) &&
+        request.resource.data.email == request.auth.token.email &&
+        request.resource.data.apodo is string && request.resource.data.rol == 'jugador';
+      allow update: if admin() || (authorized() && request.auth.uid == uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['apodo','fechaNacimiento','avatar','fotoData','fotoUrl']));
+      allow delete: if false;
+    }
+    match /configuracion/{id} {
+      allow read: if authorized();
+      allow create, update, delete: if admin();
+    }
+    match /jugadores/{id} {
+      allow read: if authorized() || tablero();
+      allow create, update, delete: if admin();
+    }
+    match /partidos/{id} {
+      allow read: if authorized() || (tablero() && id == 'proximo');
+      allow create, delete: if admin();
+      allow update: if admin() || (
+        tablero() && id == 'proximo' &&
+        (
+          // Actualizaciones de goles del tablero (provisionales; no validan cada evento).
+          (
+            resource.data.estado in ['programado','en vivo'] &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['eventosGol','golesVerde','golesBlanco','estado']) &&
+            request.resource.data.keys().hasAll(['eventosGol','golesVerde','golesBlanco','estado']) &&
+            request.resource.data.eventosGol is list &&
+            request.resource.data.golesVerde is int &&
+            request.resource.data.golesBlanco is int &&
+            request.resource.data.golesVerde >= 0 && request.resource.data.golesVerde <= 99 &&
+            request.resource.data.golesBlanco >= 0 && request.resource.data.golesBlanco <= 99 &&
+            request.resource.data.estado == 'en vivo'
+          ) ||
+          // Cierre: únicamente el estado, sin modificar goles ni formaciones.
+          (
+            resource.data.estado in ['programado','en vivo'] &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado']) &&
+            request.resource.data.estado == 'finalizado' &&
+            getAfter(/databases/$(database)/documents/historial/$(resource.data.id)).data == request.resource.data
+          )
+        )
+      );
+    }
+    match /historial/{id} {
+      allow read: if authorized();
+      allow create: if admin() || (
+        tablero() &&
+        exists(/databases/$(database)/documents/partidos/proximo) &&
+        get(/databases/$(database)/documents/partidos/proximo).data.id == id &&
+        get(/databases/$(database)/documents/partidos/proximo).data.estado in ['programado','en vivo'] &&
+        request.resource.data == getAfter(/databases/$(database)/documents/partidos/proximo).data &&
+        request.resource.data.estado == 'finalizado'
+      );
+      allow update, delete: if admin();
+    }
+    match /prode/{id} {
+      // WEB: comprobar el documento propio del partido vigente aunque aún no exista.
+      allow get: if admin() || (authorized() && (
+        (exists(/databases/$(database)/documents/partidos/proximo) &&
+          id == get(/databases/$(database)/documents/partidos/proximo).data.id + '_' + request.auth.uid) ||
+        resource.data.usuarioUid == request.auth.uid
+      ));
+      allow list: if admin() || (authorized() && resource.data.usuarioUid == request.auth.uid);
+      allow create: if authorized() &&
+        request.resource.data.keys().hasOnly(['partidoId','usuarioUid','ganador','golesVerde','golesBlanco','fechaPartido','creadoEn']) &&
+        request.resource.data.keys().hasAll(['partidoId','usuarioUid','ganador','golesVerde','golesBlanco','fechaPartido','creadoEn']) &&
+        request.resource.data.usuarioUid == request.auth.uid &&
+        id == request.resource.data.partidoId + '_' + request.auth.uid &&
+        request.resource.data.ganador in ['verde','empate','blanco'] &&
+        request.resource.data.golesVerde is int && request.resource.data.golesVerde >= 0 && request.resource.data.golesVerde <= 99 &&
+        request.resource.data.golesBlanco is int && request.resource.data.golesBlanco >= 0 && request.resource.data.golesBlanco <= 99 &&
+        exists(/databases/$(database)/documents/partidos/proximo) &&
+        get(/databases/$(database)/documents/partidos/proximo).data.id == request.resource.data.partidoId &&
+        get(/databases/$(database)/documents/partidos/proximo).data.estado == 'programado' &&
+        request.time < get(/databases/$(database)/documents/partidos/proximo).data.inicioEn;
+      allow update, delete: if false;
+    }
+    match /prode_rankings/{month} {
+      allow read: if authorized();
+      allow create, update: if admin() && month.matches('^[0-9]{4}-[0-9]{2}$') &&
+        request.resource.data.keys().hasOnly(['scores','names','publicadoPor','publicadoEn']) &&
+        request.resource.data.keys().hasAll(['scores','names','publicadoPor','publicadoEn']) &&
+        request.resource.data.scores is map && request.resource.data.names is map &&
+        request.resource.data.publicadoPor == request.auth.uid;
+      allow delete: if admin();
+    }
+    // NUEVO: reportajes propios y lectura desde el cierre dominical.
+    match /reportajes/{partidoId}/respuestas/{jugadorId} {
+      function edition() {
+        return get(/databases/$(database)/documents/configuracion/$("reportaje_" + partidoId)).data;
+      }
+      function ownsPlayer() {
+        return exists(/databases/$(database)/documents/jugadores/$(jugadorId)) &&
+          get(/databases/$(database)/documents/jugadores/$(jugadorId)).data.usuarioUid == request.auth.uid;
+      }
+      function validAnswer() {
+        let d = request.resource.data;
+        let e = edition();
+        let p = e.participantes[jugadorId];
+        return d.keys().hasOnly(['usuarioUid','jugadorId','partidoId','nombre','equipo','preguntaResultado','preguntaEstadistica','respuestaResultado','respuestaEstadistica','estado','creadoEn']) &&
+          d.keys().hasAll(['usuarioUid','jugadorId','partidoId','nombre','equipo','preguntaResultado','preguntaEstadistica','respuestaResultado','respuestaEstadistica','estado','creadoEn']) &&
+          d.usuarioUid == request.auth.uid && d.jugadorId == jugadorId && d.partidoId == partidoId &&
+          e.partidoId == partidoId && e.ventanaVersion == 2 && e.estadoPartido == 'finalizado' &&
+          e.aperturaEn is timestamp && e.cierreEn is timestamp && e.publicacionEn is timestamp &&
+          e.cierreEn < e.publicacionEn && e.cierreEn < e.aperturaEn + duration.value(24, 'h') &&
+          request.time >= e.aperturaEn && request.time < e.cierreEn &&
+          d.nombre == p.nombre && d.equipo == p.equipo &&
+          d.preguntaResultado == p.preguntaResultado && d.preguntaEstadistica == p.preguntaEstadistica &&
+          d.respuestaResultado is string && d.respuestaResultado.size() <= 700 &&
+          d.respuestaEstadistica is string && d.respuestaEstadistica.size() <= 700 &&
+          d.creadoEn == request.time &&
+          ((d.estado == 'respondio' && d.respuestaResultado.size() > 0 && d.respuestaEstadistica.size() > 0) ||
+           (d.estado == 'declino' && d.respuestaResultado == '' && d.respuestaEstadistica == ''));
+      }
+      allow get: if authorized() && ((ownsPlayer() && (resource == null || resource.data.usuarioUid == request.auth.uid)) || request.time >= edition().publicacionEn);
+      allow list: if authorized() && request.time >= edition().publicacionEn;
+      allow create: if authorized() && ownsPlayer() && validAnswer();
+      allow update, delete: if false;
+    }
+
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}

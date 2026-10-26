@@ -1,0 +1,34 @@
+    // NUEVO: reportajes propios y lectura desde el cierre dominical.
+    match /reportajes/{partidoId}/respuestas/{jugadorId} {
+      function edition() {
+        return get(/databases/$(database)/documents/configuracion/$("reportaje_" + partidoId)).data;
+      }
+      function ownsPlayer() {
+        return exists(/databases/$(database)/documents/jugadores/$(jugadorId)) &&
+          get(/databases/$(database)/documents/jugadores/$(jugadorId)).data.usuarioUid == request.auth.uid;
+      }
+      function validAnswer() {
+        let d = request.resource.data;
+        let e = edition();
+        let p = e.participantes[jugadorId];
+        return d.keys().hasOnly(['usuarioUid','jugadorId','partidoId','nombre','equipo','preguntaResultado','preguntaEstadistica','respuestaResultado','respuestaEstadistica','estado','creadoEn']) &&
+          d.keys().hasAll(['usuarioUid','jugadorId','partidoId','nombre','equipo','preguntaResultado','preguntaEstadistica','respuestaResultado','respuestaEstadistica','estado','creadoEn']) &&
+          d.usuarioUid == request.auth.uid && d.jugadorId == jugadorId && d.partidoId == partidoId &&
+          e.partidoId == partidoId && e.ventanaVersion == 2 && e.estadoPartido == 'finalizado' &&
+          e.aperturaEn is timestamp && e.cierreEn is timestamp && e.publicacionEn is timestamp &&
+          e.cierreEn < e.publicacionEn && e.cierreEn < e.aperturaEn + duration.value(24, 'h') &&
+          request.time >= e.aperturaEn && request.time < e.cierreEn &&
+          d.nombre == p.nombre && d.equipo == p.equipo &&
+          d.preguntaResultado == p.preguntaResultado && d.preguntaEstadistica == p.preguntaEstadistica &&
+          d.respuestaResultado is string && d.respuestaResultado.size() <= 700 &&
+          d.respuestaEstadistica is string && d.respuestaEstadistica.size() <= 700 &&
+          d.creadoEn == request.time &&
+          ((d.estado == 'respondio' && d.respuestaResultado.size() > 0 && d.respuestaEstadistica.size() > 0) ||
+           (d.estado == 'declino' && d.respuestaResultado == '' && d.respuestaEstadistica == ''));
+      }
+      allow get: if authorized() && ((ownsPlayer() && (resource == null || resource.data.usuarioUid == request.auth.uid)) || request.time >= edition().publicacionEn);
+      allow list: if authorized() && request.time >= edition().publicacionEn;
+      allow create: if authorized() && ownsPlayer() && validAnswer();
+      allow update, delete: if false;
+    }
+
